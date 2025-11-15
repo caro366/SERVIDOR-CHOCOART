@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from typing import List, Optional
 from app.core.db import get_conn
 from app.models.productos import PaginaProductos, Producto
@@ -7,6 +7,91 @@ import asyncio
 
 router = APIRouter(prefix="/productos", tags=["Productos"])
 
+# ✅ RUTA MÁS ESPECÍFICA PRIMERO: /buscar
+@router.get("/buscar", response_model=dict)
+async def buscar_productos(
+    q: str = Query(..., min_length=1, description="Término de búsqueda"),
+    limite: int = Query(20, ge=1, le=100)
+):
+    """
+    Busca productos por nombre, descripción, categoría o subcategoría
+    """
+    conn = get_conn()
+    cursor = conn.cursor(dictionary=True)
+
+    try:
+        sql = """
+            SELECT 
+                p.id,
+                p.nombre,
+                p.descripcion,
+                p.precio,
+                p.precio_anterior,
+                p.stock,
+                p.rating,
+                p.reviews,
+                p.destacado,
+                s.nombre as subcategoria,
+                c.nombre as categoria,
+                (SELECT ruta FROM imagenes WHERE producto_id = p.id LIMIT 1) as imagen
+            FROM productos p
+            LEFT JOIN subcategorias s ON p.subcategoria_id = s.id
+            LEFT JOIN categorias c ON s.categoria_id = c.id
+            WHERE p.activo = 1 
+            AND (
+                p.nombre LIKE %s 
+                OR p.descripcion LIKE %s
+                OR s.nombre LIKE %s
+                OR c.nombre LIKE %s
+            )
+            ORDER BY 
+                CASE 
+                    WHEN p.nombre LIKE %s THEN 1
+                    WHEN p.descripcion LIKE %s THEN 2
+                    ELSE 3
+                END,
+                p.nombre
+            LIMIT %s
+        """
+        
+        search_term = f"%{q}%"
+        search_start = f"{q}%"
+        
+        cursor.execute(sql, (
+            search_term, search_term, search_term, search_term,
+            search_start, search_start,
+            limite
+        ))
+        
+        productos = cursor.fetchall()
+        
+        # Construir URL completa de imagen
+        for producto in productos:
+            if producto.get('imagen'):
+                ruta_limpia = producto['imagen'].replace("media/", "")
+                producto['imagen'] = f"http://192.168.18.19:8001/media/{ruta_limpia}"
+            else:
+                producto['imagen'] = None
+        
+        return {
+            "success": True,
+            "total": len(productos),
+            "query": q,
+            "productos": productos
+        }
+        
+    except mysql.connector.Error as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "productos": []
+        }
+    
+    finally:
+        cursor.close()
+        conn.close()
+
+# ✅ RUTAS GENERALES DESPUÉS
 # Listar todos los productos con paginación
 @router.get("", response_model=PaginaProductos)
 async def listar_productos(
@@ -18,7 +103,6 @@ async def listar_productos(
     cursor = conn.cursor(dictionary=True)
 
     try:
-        # Consulta CORREGIDA: imagen_ruta → imagen
         sql_items = """
             SELECT p.id, p.nombre, p.precio, p.descripcion, p.rating, 
                    p.reviews, p.stock, p.destacado, p.subcategoria_id,
@@ -36,7 +120,6 @@ async def listar_productos(
         cursor.execute(sql_items, (patron, cantidad, inicio))
         rows = cursor.fetchall()
 
-        # Consulta para el total
         sql_total = """
             SELECT COUNT(*) AS total 
             FROM productos p 
@@ -48,12 +131,10 @@ async def listar_productos(
 
         productos = []
         for r in rows:
-            # ✅ Construir URL completa de la imagen - CORREGIDO
             imagen_url = None
-            if r["imagen"]:  # ← CAMBIADO: era r["imagen_ruta"]
-                # Remover "media/" si ya está en la ruta
-                ruta_limpia = r["imagen"].replace("media/", "")  # ← CAMBIADO
-                imagen_url = f"http://192.168.18.19:8001/media/{ruta_limpia}"  # ← TU IP AQUÍ
+            if r["imagen"]:
+                ruta_limpia = r["imagen"].replace("media/", "")
+                imagen_url = f"http://192.168.18.19:8001/media/{ruta_limpia}"
             
             producto = Producto(
                 id=r["id"],
@@ -65,7 +146,7 @@ async def listar_productos(
                 stock=r["stock"] or 0,
                 destacado=bool(r["destacado"]),
                 subcategoria_id=r["subcategoria_id"],
-                imagen=imagen_url  # ✅ URL completa
+                imagen=imagen_url
             )
             productos.append(producto)
 
@@ -77,7 +158,80 @@ async def listar_productos(
         cursor.close()
         conn.close()
 
-# Listar productos por subcategoría
+@router.get("/destacados/lista", response_model=dict)
+async def obtener_productos_destacados(
+    limite: int = Query(6, ge=1, le=20)
+):
+    """
+    Obtiene los productos destacados con todas sus imágenes
+    """
+    conn = get_conn()
+    cursor = conn.cursor(dictionary=True)
+
+    try:
+        # Obtener productos destacados
+        sql_productos = """
+            SELECT 
+                p.id,
+                p.nombre,
+                p.descripcion,
+                s.nombre as subcategoria,
+                c.nombre as categoria
+            FROM productos p
+            LEFT JOIN subcategorias s ON p.subcategoria_id = s.id
+            LEFT JOIN categorias c ON s.categoria_id = c.id
+            WHERE p.destacado = 1 AND p.activo = 1
+            ORDER BY p.fecha_creacion DESC
+            LIMIT %s
+        """
+        
+        cursor.execute(sql_productos, (limite,))
+        productos = cursor.fetchall()
+        
+        # Para cada producto, obtener sus imágenes
+        for producto in productos:
+            sql_imagenes = """
+                SELECT id, ruta, tipo, ancho, alto
+                FROM imagenes
+                WHERE producto_id = %s
+                ORDER BY fecha_carga ASC
+            """
+            cursor.execute(sql_imagenes, (producto['id'],))
+            imagenes = cursor.fetchall()
+            
+            # Construir URLs completas de imágenes
+            imagenes_procesadas = []
+            for img in imagenes:
+                ruta_limpia = img['ruta'].replace("media/", "")
+                img_url = f"http://192.168.18.19:8001/media/{ruta_limpia}"
+                imagenes_procesadas.append({
+                    'id': img['id'],
+                    'ruta': img_url,
+                    'tipo': img['tipo'],
+                    'ancho': img['ancho'],
+                    'alto': img['alto']
+                })
+            
+            producto['imagenes'] = imagenes_procesadas
+        
+        return {
+            "success": True,
+            "total": len(productos),
+            "productos": productos
+        }
+        
+    except mysql.connector.Error as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "productos": []
+        }
+    
+    finally:
+        cursor.close()
+        conn.close()
+
+# ✅ RUTA POR SUBCATEGORÍA ANTES DE RUTA CON PARÁMETRO
 @router.get("/subcategoria/{subcategoria_id}", response_model=PaginaProductos)
 async def listar_productos_por_subcategoria(
     subcategoria_id: int,
@@ -89,7 +243,6 @@ async def listar_productos_por_subcategoria(
     cursor = conn.cursor(dictionary=True)
 
     try:
-        # Consulta CORREGIDA: imagen_ruta → imagen
         sql_items = """
             SELECT p.id, p.nombre, p.precio, p.descripcion, p.rating, 
                    p.reviews, p.stock, p.destacado, s.nombre as subcategoria_nombre,
@@ -117,12 +270,10 @@ async def listar_productos_por_subcategoria(
 
         productos = []
         for r in rows:
-            # ✅ Construir URL completa de la imagen - CORREGIDO
             imagen_url = None
-            if r["imagen"]:  # ← CAMBIADO: era r["imagen_ruta"]
-                # Remover "media/" si ya está en la ruta
-                ruta_limpia = r["imagen"].replace("media/", "")  # ← CAMBIADO
-                imagen_url = f"http://192.168.18.19:8001/media/{ruta_limpia}"  # ← TU IP AQUÍ
+            if r["imagen"]:
+                ruta_limpia = r["imagen"].replace("media/", "")
+                imagen_url = f"http://192.168.18.19:8001/media/{ruta_limpia}"
             
             producto = Producto(
                 id=r["id"],
@@ -134,7 +285,7 @@ async def listar_productos_por_subcategoria(
                 stock=r["stock"] or 0,
                 destacado=bool(r["destacado"]),
                 subcategoria_id=subcategoria_id,
-                imagen=imagen_url  # ✅ URL completa
+                imagen=imagen_url
             )
             productos.append(producto)
 
@@ -146,14 +297,13 @@ async def listar_productos_por_subcategoria(
         cursor.close()
         conn.close()
 
-# Obtener un producto por ID
+# ✅ RUTA MÁS GENERAL AL FINAL: /{producto_id}
 @router.get("/{producto_id}", response_model=Producto)
 async def obtener_producto(producto_id: int):
     conn = get_conn()
     cursor = conn.cursor(dictionary=True)
 
     try:
-        # Consulta CORREGIDA: imagen_ruta → imagen
         sql = """
             SELECT p.id, p.nombre, p.precio, p.descripcion, p.rating, 
                    p.reviews, p.stock, p.destacado, p.subcategoria_id,
@@ -168,11 +318,10 @@ async def obtener_producto(producto_id: int):
         if not row:
             raise HTTPException(status_code=404, detail="Producto no encontrado")
 
-        # ✅ Construir URL completa de la imagen - CORREGIDO
         imagen_url = None
-        if row["imagen"]:  # ← CAMBIADO: era row["imagen_ruta"]
-            ruta_limpia = row["imagen"].replace("media/", "")  # ← CAMBIADO
-            imagen_url = f"http://192.168.18.19:8001/media/{ruta_limpia}"  # ← TU IP AQUÍ
+        if row["imagen"]:
+            ruta_limpia = row["imagen"].replace("media/", "")
+            imagen_url = f"http://192.168.18.19:8001/media/{ruta_limpia}"
 
         producto = Producto(
             id=row["id"],
@@ -186,7 +335,7 @@ async def obtener_producto(producto_id: int):
             subcategoria_id=row["subcategoria_id"],
             artesano_id=row["artesano_id"],
             activo=bool(row["activo"]),
-            imagen=imagen_url  # ✅ URL completa
+            imagen=imagen_url
         )
 
         return producto
@@ -197,7 +346,7 @@ async def obtener_producto(producto_id: int):
         cursor.close()
         conn.close()
 
-# Crear un nuevo producto (mantener igual)
+# POST, PUT, DELETE
 @router.post("", response_model=dict)
 async def crear_producto(producto: Producto):
     conn = get_conn()
@@ -236,7 +385,6 @@ async def crear_producto(producto: Producto):
         cursor.close()
         conn.close()
 
-# Actualizar un producto (mantener igual)
 @router.put("/{producto_id}", response_model=dict)
 async def modificar_producto(producto_id: int, producto: Producto):
     conn = get_conn()
@@ -294,26 +442,72 @@ async def modificar_producto(producto_id: int, producto: Producto):
         cursor.close()
         conn.close()
 
-# Eliminar un producto (mantener igual)
 @router.delete("/{producto_id}", response_model=dict)
 async def eliminar_producto(producto_id: int):
+    print(f"🔍 DELETE - Recibiendo petición para eliminar producto ID: {producto_id}")
+    
     conn = get_conn()
     cursor = conn.cursor()
 
     try:
-        cursor.execute("SELECT id FROM productos WHERE id = %s", (producto_id,))
-        if not cursor.fetchone():
-            raise HTTPException(status_code=404, detail="Producto no encontrado")
-
-        sql = "UPDATE productos SET activo = 0 WHERE id = %s"
-        cursor.execute(sql, (producto_id,))
-        conn.commit()
+        # Verificar si el producto existe
+        print(f"🔍 Verificando si existe producto ID: {producto_id}")
+        cursor.execute("SELECT id, nombre, activo FROM productos WHERE id = %s", (producto_id,))
+        producto = cursor.fetchone()
         
-        return {"mensaje": "Producto eliminado exitosamente"}
+        if not producto:
+            print(f"❌ Producto ID {producto_id} NO encontrado")
+            raise HTTPException(status_code=404, detail="Producto no encontrado")
+        
+        print(f"✅ Producto encontrado: ID={producto[0]}, Nombre={producto[1]}, Activo={producto[2]}")
+
+        # Verificar si hay dependencias
+        cursor.execute("SELECT COUNT(*) FROM carrito WHERE producto_id = %s", (producto_id,))
+        carrito_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM detalle_pedido WHERE producto_id = %s", (producto_id,))
+        pedidos_count = cursor.fetchone()[0]
+        
+        print(f"🔍 Dependencias: {carrito_count} en carrito, {pedidos_count} en pedidos")
+
+        # Si hay productos en el carrito, eliminarlos primero
+        if carrito_count > 0:
+            print(f"🗑 Eliminando {carrito_count} items del carrito...")
+            cursor.execute("DELETE FROM carrito WHERE producto_id = %s", (producto_id,))
+            print(f"✅ Items eliminados del carrito")
+
+        # Ahora hacer el soft delete del producto
+        sql = "UPDATE productos SET activo = 0 WHERE id = %s"
+        print(f"🔍 Ejecutando SQL: {sql} con ID={producto_id}")
+        
+        cursor.execute(sql, (producto_id,))
+        rows_affected = cursor.rowcount
+        print(f"🔍 Filas afectadas: {rows_affected}")
+        
+        conn.commit()
+        print(f"✅ COMMIT exitoso - Producto ID {producto_id} marcado como inactivo")
+        
+        # Verificar que se actualizó
+        cursor.execute("SELECT activo FROM productos WHERE id = %s", (producto_id,))
+        nuevo_estado = cursor.fetchone()
+        print(f"🔍 Verificación post-update: activo = {nuevo_estado[0]}")
+        
+        return {
+            "mensaje": "Producto eliminado exitosamente",
+            "producto_id": producto_id,
+            "rows_affected": rows_affected,
+            "items_carrito_eliminados": carrito_count
+        }
     
     except mysql.connector.Error as e:
+        print(f"❌ Error de MySQL: {str(e)}")
         conn.rollback()
         raise HTTPException(status_code=500, detail=f"Error al eliminar producto: {str(e)}")
+    except Exception as e:
+        print(f"❌ Error general: {str(e)}")
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Error inesperado: {str(e)}")
     finally:
         cursor.close()
         conn.close()
+        print(f"🔍 Conexión cerrada para producto ID: {producto_id}")

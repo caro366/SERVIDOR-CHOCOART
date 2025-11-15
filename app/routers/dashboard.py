@@ -1,147 +1,168 @@
-# app/rutas/perfil.py
 from fastapi import APIRouter, Depends
 from app.models.usuario import Usuario
 from .autenticacion import obtener_usuario_actual
 from ..models.dashboard import RespuestaDashboard, NombreValor
 from app.core.db import get_conn
 
+
+
 router = APIRouter()
+
 
 @router.get("/dashboard", response_model=RespuestaDashboard)
 def obtener_valores(usuario_actual: Usuario = Depends(obtener_usuario_actual)):
+    conn = None
+    cursor = None
 
-    conn = get_conn() 
-    cursor = conn.cursor(dictionary=True)
+    try:
+        conn = get_conn()
+        cursor = conn.cursor(dictionary=True)
 
-    # Ventas del mes
-    sql_ventas_mes = """SELECT 
-                        DAY(fecha_pedido) AS dia, SUM(total) AS total
-                    FROM
-                        pedidos
-                    WHERE
-                        MONTH(fecha_pedido) = MONTH(CURDATE())
-                            AND YEAR(fecha_pedido) = YEAR(CURDATE())
-                    GROUP BY dia
-                    ORDER BY dia"""
- 
-    cursor.execute(sql_ventas_mes)
+        # ---------------------------------------------------------
+        # 📌 1. Ventas del mes
+        # ---------------------------------------------------------
+        sql_ventas_mes = """
+            SELECT 
+                DAY(fecha_pedido) AS dia, 
+                SUM(total) AS total
+            FROM pedidos
+            WHERE
+                MONTH(fecha_pedido) = MONTH(CURDATE())
+                AND YEAR(fecha_pedido) = YEAR(CURDATE())
+                AND estado NOT IN ('cancelado')
+            GROUP BY dia
+            ORDER BY dia
+        """
 
-    datos_ventas_mes = cursor.fetchall()
-    ventas_mes = []
+        cursor.execute(sql_ventas_mes)
+        datos_ventas_mes = cursor.fetchall()
 
-    for row in datos_ventas_mes:
-        ventas_mes.append(
+        ventas_mes = [
             NombreValor(
-                nombre=str(row["dia"]),   # convierte int → str
-                valor=float(row["total"]  )
+                nombre=str(row["dia"]),
+                valor=float(row["total"]) if row["total"] else 0.0
             )
-        )
-    
-    # Ventas por tiendas
-    sql_ventas_tientas = """ 
-                            SELECT 
-                                t.nombre AS tienda, SUM(p.total) AS total
-                            FROM
-                                pedidos p
-                                    JOIN
-                                tiendas t ON p.tienda_id = t.id
-                            GROUP BY t.id , t.nombre
+            for row in datos_ventas_mes
+        ]
 
-                            """
-    cursor.execute(sql_ventas_tientas)
-    datos_ventas_tiendas = cursor.fetchall()
+        # ---------------------------------------------------------
+        # 📌 2. Ventas por artesanos
+        # ---------------------------------------------------------
+        sql_ventas_artesanos = """
+            SELECT 
+                u.nombre AS artesano, 
+                SUM(dp.subtotal) AS total
+            FROM pedidos ped
+            JOIN detalle_pedido dp ON ped.id = dp.pedido_id
+            JOIN productos p ON dp.producto_id = p.id
+            JOIN usuarios u ON p.artesano_id = u.id
+            WHERE ped.estado NOT IN ('cancelado')
+            GROUP BY u.id, u.nombre
+        """
 
-    ventas_tiendas = []
-    for row in datos_ventas_tiendas:
-        ventas_tiendas.append(
+        cursor.execute(sql_ventas_artesanos)
+        datos_ventas_artesanos = cursor.fetchall()
+
+        ventas_artesanos = [
             NombreValor(
-                nombre=row["tienda"],   
-                valor=float(row["total"]  )
+                nombre=row["artesano"],
+                valor=float(row["total"]) if row["total"] else 0.0
             )
-        )
+            for row in datos_ventas_artesanos
+        ]
 
-    #Ventas por categorias - CORREGIDA: usar detalle_pedido (singular)
-    sql_ventas_categorias = """
+        # ---------------------------------------------------------
+        # 📌 3. Ventas por categorías
+        # ---------------------------------------------------------
+        sql_ventas_categorias = """
             SELECT 
                 c.nombre AS categoria,
                 ROUND(SUM(dp.subtotal), 2) AS total
-            FROM
-                pedidos p
-                    JOIN
-                detalle_pedido dp ON dp.pedido_id = p.id
-                    JOIN
-                productos pr ON dp.producto_id = pr.id
-                    JOIN
-                categorias c ON pr.categoria_id = c.id
-            GROUP BY c.id , c.nombre
+            FROM pedidos p
+            JOIN detalle_pedido dp ON p.id = dp.pedido_id
+            JOIN productos pr ON dp.producto_id = pr.id
+            JOIN subcategorias sc ON pr.subcategoria_id = sc.id
+            JOIN categorias c ON sc.categoria_id = c.id
+            WHERE p.estado NOT IN ('cancelado')
+            GROUP BY c.id, c.nombre
             ORDER BY total DESC
             LIMIT 5
-            """
+        """
 
-    cursor.execute(sql_ventas_categorias)
-    datos_ventas_categorias = cursor.fetchall()
+        cursor.execute(sql_ventas_categorias)
+        datos_ventas_categorias = cursor.fetchall()
 
-    ventas_categorias = []
-    for row in datos_ventas_categorias:
-        ventas_categorias.append(
+        ventas_categorias = [
             NombreValor(
-                nombre=row["categoria"],   
-                valor=float(row["total"]  )
+                nombre=row["categoria"],
+                valor=float(row["total"]) if row["total"] else 0.0
+            )
+            for row in datos_ventas_categorias
+        ]
+
+        # ---------------------------------------------------------
+        # 📌 4. Tarjetas del dashboard
+        # ---------------------------------------------------------
+        tarjetas = []
+
+        # Usuarios
+        cursor.execute("SELECT COUNT(*) AS cantidad FROM usuarios WHERE activo = 1")
+        usuarios = cursor.fetchone()
+        tarjetas.append(NombreValor(nombre="Usuarios", valor=usuarios["cantidad"] if usuarios else 0))
+
+        # Categorías
+        cursor.execute("SELECT COUNT(*) AS cantidad FROM categorias WHERE activa = 1")
+        categorias = cursor.fetchone()
+        tarjetas.append(NombreValor(nombre="Categorías", valor=categorias["cantidad"] if categorias else 0))
+
+        # Pedidos del mes
+        sql_cantidad_pedidos = """
+            SELECT COUNT(*) cantidad
+            FROM pedidos
+            WHERE
+                MONTH(fecha_pedido) = MONTH(CURDATE())
+                AND YEAR(fecha_pedido) = YEAR(CURDATE())
+                AND estado NOT IN ('cancelado')
+        """
+        cursor.execute(sql_cantidad_pedidos)
+        pedidos = cursor.fetchone()
+        tarjetas.append(NombreValor(nombre="Pedidos mes", valor=pedidos["cantidad"] if pedidos else 0))
+
+        # Ventas totales del mes
+        sql_ventas_totales = """
+            SELECT COALESCE(SUM(total), 0) AS total
+            FROM pedidos
+            WHERE
+                MONTH(fecha_pedido) = MONTH(CURDATE())
+                AND YEAR(fecha_pedido) = YEAR(CURDATE())
+                AND estado NOT IN ('cancelado')
+        """
+        cursor.execute(sql_ventas_totales)
+        ventas_totales = cursor.fetchone()
+        tarjetas.append(
+            NombreValor(
+                nombre="Ventas mes",
+                valor=float(ventas_totales["total"]) if ventas_totales else 0.0
             )
         )
 
-    #Tarjetas 
-
-    tarjetas = []
-
-    # Cantidad de usuarios
-    sql_cantidad_usuarios = "SELECT COUNT(*) AS cantidad FROM usuarios"
-    cursor.execute(sql_cantidad_usuarios)
-    usuarios = cursor.fetchone()
-
-    tarjetas.append(
-        NombreValor(
-            nombre="Usuarios", 
-            valor=usuarios["cantidad"]
+        # ---------------------------------------------------------
+        # 📌 RETORNO FINAL DEL DASHBOARD
+        # ---------------------------------------------------------
+        return RespuestaDashboard(
+            ventas_mes=ventas_mes,
+            ventas_tiendas=ventas_artesanos,
+            ventas_categorias=ventas_categorias,
+            tarjetas=tarjetas
         )
-    )
 
-    # Cantidad de categorias
-    sql_cantidad_categorias = "SELECT COUNT(*) AS cantidad FROM categorias"
-    cursor.execute(sql_cantidad_categorias)
-    categorias = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"Error en dashboard: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
-    tarjetas.append(
-        NombreValor(
-            nombre="Categorías", 
-            valor=categorias["cantidad"]
-        )
-    )
-
-    # Cantidad de pedidos del mes
-    sql_cantidad_pedidos = """
-            SELECT 
-                COUNT(*) cantidad
-            FROM
-                pedidos
-            WHERE
-                MONTH(fecha_pedido) = MONTH(CURDATE())
-                    AND YEAR(fecha_pedido) = YEAR(CURDATE())
-            """
-    cursor.execute(sql_cantidad_pedidos)
-    pedidos = cursor.fetchone()
-
-    tarjetas.append(
-        NombreValor(
-            nombre="Pedidos mes", 
-            valor=pedidos["cantidad"]
-        )
-    )
-
-
-    return RespuestaDashboard(
-        ventas_mes = ventas_mes,
-        ventas_tiendas = ventas_tiendas,
-        ventas_categorias = ventas_categorias,
-        tarjetas = tarjetas
-    )
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
