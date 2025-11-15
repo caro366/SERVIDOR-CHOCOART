@@ -1,4 +1,3 @@
-# app/rutas/perfil.py
 from fastapi import APIRouter, Depends
 from app.models.usuario import Usuario
 from .autenticacion import obtener_usuario_actual

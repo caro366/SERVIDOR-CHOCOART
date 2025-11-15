@@ -1,4 +1,3 @@
-# app/rutas/autenticacion.py
 from fastapi import APIRouter, HTTPException, status, Form, Depends
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError

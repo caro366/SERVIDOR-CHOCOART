@@ -7,7 +7,7 @@ import asyncio
 
 router = APIRouter(prefix="/productos", tags=["Productos"])
 
-# ✅ RUTA MÁS ESPECÍFICA PRIMERO: /buscar
+
 @router.get("/buscar", response_model=dict)
 async def buscar_productos(
     q: str = Query(..., min_length=1, description="Término de búsqueda"),
@@ -65,7 +65,7 @@ async def buscar_productos(
         
         productos = cursor.fetchall()
         
-        # Construir URL completa de imagen
+        
         for producto in productos:
             if producto.get('imagen'):
                 ruta_limpia = producto['imagen'].replace("media/", "")
@@ -91,7 +91,6 @@ async def buscar_productos(
         cursor.close()
         conn.close()
 
-# ✅ RUTAS GENERALES DESPUÉS
 # Listar todos los productos con paginación
 @router.get("", response_model=PaginaProductos)
 async def listar_productos(
@@ -199,7 +198,7 @@ async def obtener_productos_destacados(
             cursor.execute(sql_imagenes, (producto['id'],))
             imagenes = cursor.fetchall()
             
-            # Construir URLs completas de imágenes
+            
             imagenes_procesadas = []
             for img in imagenes:
                 ruta_limpia = img['ruta'].replace("media/", "")
@@ -231,7 +230,7 @@ async def obtener_productos_destacados(
         cursor.close()
         conn.close()
 
-# ✅ RUTA POR SUBCATEGORÍA ANTES DE RUTA CON PARÁMETRO
+
 @router.get("/subcategoria/{subcategoria_id}", response_model=PaginaProductos)
 async def listar_productos_por_subcategoria(
     subcategoria_id: int,
@@ -297,7 +296,7 @@ async def listar_productos_por_subcategoria(
         cursor.close()
         conn.close()
 
-# ✅ RUTA MÁS GENERAL AL FINAL: /{producto_id}
+
 @router.get("/{producto_id}", response_model=Producto)
 async def obtener_producto(producto_id: int):
     conn = get_conn()
@@ -346,7 +345,7 @@ async def obtener_producto(producto_id: int):
         cursor.close()
         conn.close()
 
-# POST, PUT, DELETE
+
 @router.post("", response_model=dict)
 async def crear_producto(producto: Producto):
     conn = get_conn()
@@ -451,15 +450,15 @@ async def eliminar_producto(producto_id: int):
 
     try:
         # Verificar si el producto existe
-        print(f"🔍 Verificando si existe producto ID: {producto_id}")
+        print(f" Verificando si existe producto ID: {producto_id}")
         cursor.execute("SELECT id, nombre, activo FROM productos WHERE id = %s", (producto_id,))
         producto = cursor.fetchone()
         
         if not producto:
-            print(f"❌ Producto ID {producto_id} NO encontrado")
+            print(f" Producto ID {producto_id} NO encontrado")
             raise HTTPException(status_code=404, detail="Producto no encontrado")
         
-        print(f"✅ Producto encontrado: ID={producto[0]}, Nombre={producto[1]}, Activo={producto[2]}")
+        print(f" Producto encontrado: ID={producto[0]}, Nombre={producto[1]}, Activo={producto[2]}")
 
         # Verificar si hay dependencias
         cursor.execute("SELECT COUNT(*) FROM carrito WHERE producto_id = %s", (producto_id,))
@@ -468,29 +467,29 @@ async def eliminar_producto(producto_id: int):
         cursor.execute("SELECT COUNT(*) FROM detalle_pedido WHERE producto_id = %s", (producto_id,))
         pedidos_count = cursor.fetchone()[0]
         
-        print(f"🔍 Dependencias: {carrito_count} en carrito, {pedidos_count} en pedidos")
+        print(f" Dependencias: {carrito_count} en carrito, {pedidos_count} en pedidos")
 
         # Si hay productos en el carrito, eliminarlos primero
         if carrito_count > 0:
             print(f"🗑 Eliminando {carrito_count} items del carrito...")
             cursor.execute("DELETE FROM carrito WHERE producto_id = %s", (producto_id,))
-            print(f"✅ Items eliminados del carrito")
+            print(f" Items eliminados del carrito")
 
         # Ahora hacer el soft delete del producto
         sql = "UPDATE productos SET activo = 0 WHERE id = %s"
-        print(f"🔍 Ejecutando SQL: {sql} con ID={producto_id}")
+        print(f"Ejecutando SQL: {sql} con ID={producto_id}")
         
         cursor.execute(sql, (producto_id,))
         rows_affected = cursor.rowcount
-        print(f"🔍 Filas afectadas: {rows_affected}")
+        print(f" Filas afectadas: {rows_affected}")
         
         conn.commit()
-        print(f"✅ COMMIT exitoso - Producto ID {producto_id} marcado como inactivo")
+        print(f" COMMIT exitoso - Producto ID {producto_id} marcado como inactivo")
         
         # Verificar que se actualizó
         cursor.execute("SELECT activo FROM productos WHERE id = %s", (producto_id,))
         nuevo_estado = cursor.fetchone()
-        print(f"🔍 Verificación post-update: activo = {nuevo_estado[0]}")
+        print(f" Verificación post-update: activo = {nuevo_estado[0]}")
         
         return {
             "mensaje": "Producto eliminado exitosamente",
@@ -500,14 +499,14 @@ async def eliminar_producto(producto_id: int):
         }
     
     except mysql.connector.Error as e:
-        print(f"❌ Error de MySQL: {str(e)}")
+        print(f" Error de MySQL: {str(e)}")
         conn.rollback()
         raise HTTPException(status_code=500, detail=f"Error al eliminar producto: {str(e)}")
     except Exception as e:
-        print(f"❌ Error general: {str(e)}")
+        print(f" Error general: {str(e)}")
         conn.rollback()
         raise HTTPException(status_code=500, detail=f"Error inesperado: {str(e)}")
     finally:
         cursor.close()
         conn.close()
-        print(f"🔍 Conexión cerrada para producto ID: {producto_id}")
+        print(f" Conexión cerrada para producto ID: {producto_id}")

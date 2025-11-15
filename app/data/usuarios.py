@@ -1,4 +1,3 @@
-# app/repositorios/usuarios_sql.py
 from typing import Optional
 from app.core.db import get_conn, obtener_conexion
 from app.models.usuario import UsuarioEnBD

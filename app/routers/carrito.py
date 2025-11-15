@@ -1,4 +1,3 @@
-# app/routers/carrito.py
 from fastapi import APIRouter, Depends, HTTPException, Form
 from app.core.db import get_conn
 from app.models.usuario import Usuario

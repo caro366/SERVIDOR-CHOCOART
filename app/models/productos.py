@@ -15,7 +15,7 @@ class Producto(BaseModel):
     destacado: bool = False
     activo: bool = True
     fecha_creacion: Optional[str] = None  
-    imagen: Optional[str] = None  # ✅ Este campo debe existir
+    imagen: Optional[str] = None  
 
     @field_validator("nombre")
     @classmethod

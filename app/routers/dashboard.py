@@ -18,9 +18,9 @@ def obtener_valores(usuario_actual: Usuario = Depends(obtener_usuario_actual)):
         conn = get_conn()
         cursor = conn.cursor(dictionary=True)
 
-        # ---------------------------------------------------------
-        # 📌 1. Ventas del mes
-        # ---------------------------------------------------------
+        
+        #  1. Ventas del mes
+       
         sql_ventas_mes = """
             SELECT 
                 DAY(fecha_pedido) AS dia, 
@@ -45,9 +45,9 @@ def obtener_valores(usuario_actual: Usuario = Depends(obtener_usuario_actual)):
             for row in datos_ventas_mes
         ]
 
-        # ---------------------------------------------------------
-        # 📌 2. Ventas por artesanos
-        # ---------------------------------------------------------
+       
+        #  2. Ventas por artesanos
+        
         sql_ventas_artesanos = """
             SELECT 
                 u.nombre AS artesano, 
@@ -71,9 +71,9 @@ def obtener_valores(usuario_actual: Usuario = Depends(obtener_usuario_actual)):
             for row in datos_ventas_artesanos
         ]
 
-        # ---------------------------------------------------------
-        # 📌 3. Ventas por categorías
-        # ---------------------------------------------------------
+       
+        # 3. Ventas por categorías
+        
         sql_ventas_categorias = """
             SELECT 
                 c.nombre AS categoria,
@@ -100,9 +100,9 @@ def obtener_valores(usuario_actual: Usuario = Depends(obtener_usuario_actual)):
             for row in datos_ventas_categorias
         ]
 
-        # ---------------------------------------------------------
-        # 📌 4. Tarjetas del dashboard
-        # ---------------------------------------------------------
+       
+        #  4. Tarjetas del dashboard
+        
         tarjetas = []
 
         # Usuarios
@@ -146,9 +146,9 @@ def obtener_valores(usuario_actual: Usuario = Depends(obtener_usuario_actual)):
             )
         )
 
-        # ---------------------------------------------------------
-        # 📌 RETORNO FINAL DEL DASHBOARD
-        # ---------------------------------------------------------
+       
+        #  RETORNO FINAL DEL DASHBOARD
+        
         return RespuestaDashboard(
             ventas_mes=ventas_mes,
             ventas_tiendas=ventas_artesanos,

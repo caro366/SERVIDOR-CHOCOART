@@ -1,11 +1,9 @@
-# app/routers/categoria.py
 from fastapi import APIRouter
 from typing import List
 from app.core.db import get_conn
 
 router = APIRouter(prefix="/categorias")
 
-# Modelo simple (como tienes en otros routers)
 from pydantic import BaseModel
 
 class Categoria(BaseModel):

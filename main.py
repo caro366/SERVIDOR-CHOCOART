@@ -36,10 +36,10 @@ app = FastAPI(title="Gestión de productos")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # En entorno de desarrollo se acepta cualquier origen; en producción se recomienda restringir
-    allow_credentials=True, # Habilita el uso de cookies o autenticación
-    allow_methods=["*"],    # Métodos HTTP permitidos
-    allow_headers=["*"],    # Encabezados permitidos
+    allow_origins=["*"],   
+    allow_credentials=True, 
+    allow_methods=["*"],    
+    allow_headers=["*"],    
 )
 
 # Carpeta donde se guardarán las imágenes
@@ -49,10 +49,10 @@ MEDIA_DIR.mkdir(exist_ok=True)
 # Servir las imágenes subidas
 app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
-app.include_router(categoria.router)      # Rutas de categorías y subcategorías
-app.include_router(productos.router)      # Rutas de productos
-app.include_router(autenticacion.router)  # Autenticación
-app.include_router(perfil.router)         # Perfil de usuario
+app.include_router(categoria.router)     
+app.include_router(productos.router)      
+app.include_router(autenticacion.router)  
+app.include_router(perfil.router)        
 app.include_router(dashboard.router)   
 app.include_router(carrito.router)
 app.include_router(pedidos.router)
