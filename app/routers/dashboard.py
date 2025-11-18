@@ -1,12 +1,16 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+import traceback
+import logging
+
 from app.models.usuario import Usuario
 from .autenticacion import obtener_usuario_actual
 from ..models.dashboard import RespuestaDashboard, NombreValor
 from app.core.db import get_conn
 
-
-
 router = APIRouter()
+
+# Logger agregado (Código 2)
+logger = logging.getLogger(__name__)
 
 
 @router.get("/dashboard", response_model=RespuestaDashboard)
@@ -18,9 +22,7 @@ def obtener_valores(usuario_actual: Usuario = Depends(obtener_usuario_actual)):
         conn = get_conn()
         cursor = conn.cursor(dictionary=True)
 
-        
-        #  1. Ventas del mes
-       
+        # 1. Ventas del mes
         sql_ventas_mes = """
             SELECT 
                 DAY(fecha_pedido) AS dia, 
@@ -45,9 +47,7 @@ def obtener_valores(usuario_actual: Usuario = Depends(obtener_usuario_actual)):
             for row in datos_ventas_mes
         ]
 
-       
-        #  2. Ventas por artesanos
-        
+        # 2. Ventas por artesanos
         sql_ventas_artesanos = """
             SELECT 
                 u.nombre AS artesano, 
@@ -71,9 +71,7 @@ def obtener_valores(usuario_actual: Usuario = Depends(obtener_usuario_actual)):
             for row in datos_ventas_artesanos
         ]
 
-       
         # 3. Ventas por categorías
-        
         sql_ventas_categorias = """
             SELECT 
                 c.nombre AS categoria,
@@ -100,22 +98,17 @@ def obtener_valores(usuario_actual: Usuario = Depends(obtener_usuario_actual)):
             for row in datos_ventas_categorias
         ]
 
-       
-        #  4. Tarjetas del dashboard
-        
+        # 4. Tarjetas
         tarjetas = []
 
-        # Usuarios
         cursor.execute("SELECT COUNT(*) AS cantidad FROM usuarios WHERE activo = 1")
         usuarios = cursor.fetchone()
         tarjetas.append(NombreValor(nombre="Usuarios", valor=usuarios["cantidad"] if usuarios else 0))
 
-        # Categorías
         cursor.execute("SELECT COUNT(*) AS cantidad FROM categorias WHERE activa = 1")
         categorias = cursor.fetchone()
         tarjetas.append(NombreValor(nombre="Categorías", valor=categorias["cantidad"] if categorias else 0))
 
-        # Pedidos del mes
         sql_cantidad_pedidos = """
             SELECT COUNT(*) cantidad
             FROM pedidos
@@ -128,7 +121,6 @@ def obtener_valores(usuario_actual: Usuario = Depends(obtener_usuario_actual)):
         pedidos = cursor.fetchone()
         tarjetas.append(NombreValor(nombre="Pedidos mes", valor=pedidos["cantidad"] if pedidos else 0))
 
-        # Ventas totales del mes
         sql_ventas_totales = """
             SELECT COALESCE(SUM(total), 0) AS total
             FROM pedidos
@@ -139,6 +131,7 @@ def obtener_valores(usuario_actual: Usuario = Depends(obtener_usuario_actual)):
         """
         cursor.execute(sql_ventas_totales)
         ventas_totales = cursor.fetchone()
+
         tarjetas.append(
             NombreValor(
                 nombre="Ventas mes",
@@ -146,9 +139,6 @@ def obtener_valores(usuario_actual: Usuario = Depends(obtener_usuario_actual)):
             )
         )
 
-       
-        #  RETORNO FINAL DEL DASHBOARD
-        
         return RespuestaDashboard(
             ventas_mes=ventas_mes,
             ventas_tiendas=ventas_artesanos,
